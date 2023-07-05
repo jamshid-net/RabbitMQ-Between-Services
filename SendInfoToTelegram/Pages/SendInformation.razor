@@ -1,0 +1,101 @@
+﻿@page "/telegramService"
+@using Domain;
+@using Newtonsoft.Json;
+@using RabbitMQ.Client;
+@using System.Text;
+@using System.Runtime.Serialization.Formatters.Binary;
+@using SendInfoToTelegram.Data;
+<h3>SendInformation</h3>
+
+
+
+
+<EditForm Model="@model" OnSubmit="@HandleValidSubmit">
+    <label>
+        Title image:
+        <InputText @bind-Value="@model.Title" class="form-control" />
+    </label>
+    <label>
+        Image:
+        <InputFile OnChange="OnChangeFile" class="form-control" />
+    </label>
+    <div class="card" style="width:30rem;">
+        <div class="card-body">
+
+            <p><img class="rounded m-1" src="@singleImageUrl" /></p>
+
+        </div>
+    </div>
+    <button class="btn btn-success" type="submit">Upload</button>
+</EditForm>
+
+
+
+@code {
+    Message model = new Message();
+
+    ConnectionFactory factory = new ConnectionFactory()
+    {
+        HostName = "localhost",
+        UserName = "jamshid",
+        Password = "12345"
+    };
+
+
+    protected EditContext editContext;
+    private IBrowserFile SingleImage;
+    string singleImageUrl = string.Empty;
+    protected override async Task OnInitializedAsync()
+    {
+        editContext = new(model);
+    }
+
+    private async Task OnChangeFile(InputFileChangeEventArgs image)
+    {
+
+
+        SingleImage = null;
+        var format = "image/png";
+        SingleImage = image.File;
+        var resizedImageFile = await SingleImage.RequestImageFileAsync(format, 300, 300);
+        var buffer = new byte[resizedImageFile.Size];
+        await resizedImageFile.OpenReadStream().ReadAsync(buffer);
+
+        singleImageUrl = $"data:{format};base64,{Convert.ToBase64String(buffer)}";
+
+        editContext.NotifyFieldChanged(FieldIdentifier.Create(() => SingleImage));
+
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        model.ImageName = SingleImage.Name;
+        var fileSize = 1024 * 1024 * 10;
+        var buffer = new byte[SingleImage.Size];
+        using var fs = SingleImage.OpenReadStream(fileSize);
+        await fs.ReadAsync(buffer);
+        model.ImageByte = buffer;
+        NameTitle nameTitle = new NameTitle()
+        {
+            Title = model.Title,
+            Name = model.ImageName
+        };
+        var nameTitleJson = JsonConvert.SerializeObject(nameTitle);
+
+        var body = Encoding.UTF8.GetBytes(nameTitleJson);
+
+        using (var connection = factory.CreateConnection())
+        using (var channel = connection.CreateModel())
+        {
+            channel.BasicPublish("FileUpload2", "", body: model.ImageByte);
+            channel.BasicPublish("NameTitle", "secret", body: body);
+        }
+        model = new Message();
+        singleImageUrl = null;
+        SingleImage = null;
+        buffer = null;
+    }
+   
+    
+
+}
